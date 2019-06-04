@@ -1,20 +1,35 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net/http"
 )
 
 type Joke struct {
-	Setup     string
-	Punchline string
+	Text string
+}
+
+type JokeResponse struct {
+	Value struct {
+		Author     string
+		Categories []string
+		Id         int
+		Joke       string
+	}
 }
 
 func JokesHandler(w http.ResponseWriter, r *http.Request) {
-	joke := Joke{"What rhymes with orange?", "No it doesn't!"}
-	templates := template.Must(template.ParseFiles("templates/jokes-template.html"))
-	if err := templates.ExecuteTemplate(w, "jokes-template.html", joke); err != nil {
+	resp, err := http.Get("https://jokes-api.herokuapp.com/api/joke")
+	if err == nil {
+		defer resp.Body.Close()
+		jokeResponse := new(JokeResponse)
+		json.NewDecoder(resp.Body).Decode(jokeResponse)
+		joke := Joke{jokeResponse.Value.Joke}
+		templates := template.Must(template.ParseFiles("templates/jokes-template.html"))
+		templates.ExecuteTemplate(w, "jokes-template.html", joke)
+	} else {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
 }
