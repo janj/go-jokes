@@ -8,7 +8,15 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 )
+
+type Joke struct {
+	Author     string
+	Categories []string
+	Id         int
+	Joke       string
+}
 
 type JokeResponse struct {
 	Value struct {
@@ -17,6 +25,21 @@ type JokeResponse struct {
 		Id         int
 		Joke       string
 	}
+}
+
+type repository struct {
+	responses map[string]Joke
+}
+
+var (
+	r map[string]Joke
+)
+
+func Repository() map[string]Joke {
+	if r == nil {
+		r = make(map[string]Joke)
+	}
+	return r
 }
 
 func JsonRequest(url string, v interface{}) error {
@@ -38,8 +61,8 @@ func UrlJoin(base string, paths ...string) (*url.URL, error) {
 	return u, nil
 }
 
-func GetJokeResponse(joke_id string) (*JokeResponse, error) {
-	url, url_err := UrlJoin("https://jokes-api.herokuapp.com", "/api/joke", joke_id)
+func GetJokeResponse(urlComponents ...string) (*JokeResponse, error) {
+	url, url_err := UrlJoin("https://jokes-api.herokuapp.com", urlComponents...)
 	if url_err != nil {
 		return nil, url_err
 	}
@@ -52,19 +75,36 @@ func GetJokeResponse(joke_id string) (*JokeResponse, error) {
 	return jokeResponse, nil
 }
 
+func PresentJoke(w http.ResponseWriter, joke Joke) {
+	templates := template.Must(template.ParseFiles("templates/jokes-template.html"))
+	templates.ExecuteTemplate(w, "jokes-template.html", joke)
+	Repository()[strconv.Itoa(joke.Id)] = joke
+}
+
 func JokeHandler(w http.ResponseWriter, r *http.Request) {
 	joke_id := mux.Vars(r)["id"]
-	jokeResponse, err := GetJokeResponse(joke_id)
+	if response, ok := Repository()[joke_id]; ok {
+		PresentJoke(w, response)
+	} else {
+		jokeResponse, err := GetJokeResponse("/api/joke", joke_id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		PresentJoke(w, jokeResponse.Value)
+	}
+}
+
+func JokesHandler(w http.ResponseWriter, r *http.Request) {
+	jokeResponse, err := GetJokeResponse("/api/joke")
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
-	templates := template.Must(template.ParseFiles("templates/jokes-template.html"))
-	templates.ExecuteTemplate(w, "jokes-template.html", jokeResponse.Value)
+	PresentJoke(w, jokeResponse.Value)
 }
 
 func main() {
 	r := mux.NewRouter()
-	r.HandleFunc("/jokes", JokeHandler)
+	r.HandleFunc("/jokes", JokesHandler)
 	r.HandleFunc("/jokes/{id}", JokeHandler)
 	http.Handle("/", r)
 	fmt.Println("Listening")
