@@ -55,8 +55,25 @@ func UrlJoin(base string, paths ...string) (*url.URL, error) {
 	return u, nil
 }
 
-func GetJokeResponse(urlComponents ...string) (*JokeResponse, error) {
-	url, url_err := UrlJoin("https://jokes-api.herokuapp.com", urlComponents...)
+type JokeSource struct {
+	baseUrl string
+	pathToJoke string
+	pathToRandomJoke string
+}
+
+var herokuSource = JokeSource {
+	baseUrl: "https://jokes-api.herokuapp.com",
+	pathToJoke: "/api/joke",
+	pathToRandomJoke: "/api/joke",
+}
+
+type JokeHandlerMap struct {
+	random func(w http.ResponseWriter, r *http.Request)
+	withId func(w http.ResponseWriter, r *http.Request)
+}
+
+func GetJokeResponse(urlBase string, urlComponents ...string) (*JokeResponse, error) {
+	url, url_err := UrlJoin(urlBase, urlComponents...)
 	if url_err != nil {
 		return nil, url_err
 	}
@@ -75,31 +92,35 @@ func PresentJoke(w http.ResponseWriter, joke Joke) {
 	Repository()[strconv.Itoa(joke.Id)] = joke
 }
 
-func JokeHandler(w http.ResponseWriter, r *http.Request) {
-	joke_id := mux.Vars(r)["id"]
-	if response, ok := Repository()[joke_id]; ok {
-		PresentJoke(w, response)
-	} else {
-		jokeResponse, err := GetJokeResponse("/api/joke", joke_id)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-		PresentJoke(w, jokeResponse.Value)
+func JokeHandlerFactory(jokeSource JokeSource) JokeHandlerMap {
+	return JokeHandlerMap {
+		withId: func(w http.ResponseWriter, r *http.Request) {
+			joke_id := mux.Vars(r)["id"]
+			if response, ok := Repository()[joke_id]; ok {
+				PresentJoke(w, response)
+			} else {
+				jokeResponse, err := GetJokeResponse(jokeSource.baseUrl, jokeSource.pathToJoke, joke_id)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusInternalServerError)
+				}
+				PresentJoke(w, jokeResponse.Value)
+			}
+		},
+		random: func(w http.ResponseWriter, r *http.Request) {
+			jokeResponse, err := GetJokeResponse(jokeSource.baseUrl, jokeSource.pathToRandomJoke)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+			}
+			PresentJoke(w, jokeResponse.Value)
+		},
 	}
-}
-
-func JokesHandler(w http.ResponseWriter, r *http.Request) {
-	jokeResponse, err := GetJokeResponse("/api/joke")
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-	PresentJoke(w, jokeResponse.Value)
 }
 
 func main() {
+	var jokeHandlers = JokeHandlerFactory(herokuSource)
 	r := mux.NewRouter()
-	r.HandleFunc("/jokes", JokesHandler)
-	r.HandleFunc("/jokes/{id}", JokeHandler)
+	r.HandleFunc("/jokes", jokeHandlers.random)
+	r.HandleFunc("/jokes/{id}", jokeHandlers.withId)
 	http.Handle("/", r)
 	fmt.Println("Listening")
 	fmt.Println(http.ListenAndServe(":8080", nil))
