@@ -1,3 +1,5 @@
+// go run main.go
+
 package main
 
 import (
@@ -13,31 +15,23 @@ import (
 
 type Joke struct {
 	Author     string
-	Categories []string
 	Id         int
 	Joke       string
 }
 
 type JokeResponse struct {
-	Value struct {
-		Author     string
-		Categories []string
-		Id         int
-		Joke       string
-	}
+	Value Joke
 }
 
-type repository struct {
-	responses map[string]Joke
-}
+type JokeMap map[string]Joke
 
 var (
-	r map[string]Joke
+	r JokeMap
 )
 
-func Repository() map[string]Joke {
+func Repository() JokeMap {
 	if r == nil {
-		r = make(map[string]Joke)
+		r = make(JokeMap)
 	}
 	return r
 }
