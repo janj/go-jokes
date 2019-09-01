@@ -10,17 +10,12 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"strconv"
 )
 
 type Joke struct {
 	Author     string
-	Id         int
+	Id         string
 	Joke       string
-}
-
-type JokeResponse struct {
-	Value Joke
 }
 
 type JokeMap map[string]Joke
@@ -55,72 +50,87 @@ func UrlJoin(base string, paths ...string) (*url.URL, error) {
 	return u, nil
 }
 
-type JokeSource struct {
-	baseUrl string
-	pathToJoke string
-	pathToRandomJoke string
-}
-
-var herokuSource = JokeSource {
-	baseUrl: "https://jokes-api.herokuapp.com",
-	pathToJoke: "/api/joke",
-	pathToRandomJoke: "/api/joke",
-}
-
-type JokeHandlerMap struct {
-	random func(w http.ResponseWriter, r *http.Request)
-	withId func(w http.ResponseWriter, r *http.Request)
-}
-
-func GetJokeResponse(urlBase string, urlComponents ...string) (*JokeResponse, error) {
-	url, url_err := UrlJoin(urlBase, urlComponents...)
-	if url_err != nil {
-		return nil, url_err
+type HerokuResponse struct {
+	Value struct {
+		Author     string
+		Id         string
+		Joke       string
 	}
-	jokeResponse := new(JokeResponse)
-	fmt.Println(url.String())
-	json_err := JsonRequest(url.String(), jokeResponse)
-	if json_err != nil {
-		return nil, json_err
+}
+
+type JokeRetriever struct {
+	random func() (Joke, error)
+	withId func(string) (Joke, error)
+}
+
+var herokuJokes = JokeRetriever{
+	random: func () (Joke, error) {
+		response := new(HerokuResponse)
+		err := GetJsonResponse(response, "https://jokes-api.herokuapp.com", "/api/joke")
+		if err != nil {
+			return *new(Joke), err
+		}
+		return response.Value, nil
+	},
+	withId: func (jokeId string) (Joke, error) {
+		response := new(HerokuResponse)
+		err := GetJsonResponse(response, "https://jokes-api.herokuapp.com", "/api/joke", jokeId)
+		if err != nil {
+			return *new(Joke), err
+		}
+		return response.Value, nil
+	},
+}
+
+func GetJsonResponse(jsonResponse interface{}, urlBase string, urlComponents ...string) (error) {
+	url, urlErr := UrlJoin(urlBase, urlComponents...)
+	if urlErr != nil {
+		return urlErr
 	}
-	return jokeResponse, nil
+	fmt.Println("Getting from:", url.String())
+	return JsonRequest(url.String(), jsonResponse)
 }
 
 func PresentJoke(w http.ResponseWriter, joke Joke) {
 	templates := template.Must(template.ParseFiles("templates/jokes-template.html"))
 	templates.ExecuteTemplate(w, "jokes-template.html", joke)
-	Repository()[strconv.Itoa(joke.Id)] = joke
+	Repository()[joke.Id] = joke
 }
 
-func JokeHandlerFactory(jokeSource JokeSource) JokeHandlerMap {
-	return JokeHandlerMap {
+type Handler struct {
+	withId func(http.ResponseWriter, *http.Request)
+	random func(http.ResponseWriter, *http.Request)
+}
+
+func JokeHandlerFactory(retriever JokeRetriever) Handler {
+	return Handler {
 		withId: func(w http.ResponseWriter, r *http.Request) {
-			joke_id := mux.Vars(r)["id"]
-			if response, ok := Repository()[joke_id]; ok {
+			jokeId := mux.Vars(r)["id"]
+			if response, ok := Repository()[jokeId]; ok {
 				PresentJoke(w, response)
 			} else {
-				jokeResponse, err := GetJokeResponse(jokeSource.baseUrl, jokeSource.pathToJoke, joke_id)
+				joke, err := retriever.withId(jokeId)
 				if err != nil {
 					http.Error(w, err.Error(), http.StatusInternalServerError)
 				}
-				PresentJoke(w, jokeResponse.Value)
+				PresentJoke(w, joke)
 			}
 		},
 		random: func(w http.ResponseWriter, r *http.Request) {
-			jokeResponse, err := GetJokeResponse(jokeSource.baseUrl, jokeSource.pathToRandomJoke)
+			joke, err := retriever.random()
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 			}
-			PresentJoke(w, jokeResponse.Value)
+			PresentJoke(w, joke)
 		},
 	}
 }
 
 func main() {
-	var jokeHandlers = JokeHandlerFactory(herokuSource)
+	var handlers = JokeHandlerFactory(herokuJokes)
 	r := mux.NewRouter()
-	r.HandleFunc("/jokes", jokeHandlers.random)
-	r.HandleFunc("/jokes/{id}", jokeHandlers.withId)
+	r.HandleFunc("/jokes", handlers.random)
+	r.HandleFunc("/jokes/{id}", handlers.withId)
 	http.Handle("/", r)
 	fmt.Println("Listening")
 	fmt.Println(http.ListenAndServe(":8080", nil))
