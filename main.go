@@ -10,15 +10,15 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 )
 
 type Joke struct {
-	Author     string
-	Id         string
+	Id         int
 	Joke       string
 }
 
-type JokeMap map[string]Joke
+type JokeMap map[int]Joke
 
 var (
 	r JokeMap
@@ -43,14 +43,13 @@ func UrlJoin(base string, paths ...string) (*url.URL, error) {
 
 type JokeRetriever struct {
 	Random func() (Joke, error)
-	WithId func(string) (Joke, error)
+	WithId func(int) (Joke, error)
 }
 
 func HerokuJokesFactory() JokeRetriever {
 	type HerokuResponse struct {
 		Value struct {
-			Author     string
-			Id         string
+			Id         int
 			Joke       string
 		}
 	}
@@ -68,8 +67,35 @@ func HerokuJokesFactory() JokeRetriever {
 		Random: func () (Joke, error) {
 			return getJoke()
 		},
-		WithId: func (jokeId string) (Joke, error) {
-			return getJoke(jokeId)
+		WithId: func (jokeId int) (Joke, error) {
+			return getJoke(strconv.Itoa(jokeId))
+		},
+	}
+}
+
+func IcndbJokesFactory() JokeRetriever {
+	type IcndbResponse struct {
+		Value struct {
+			Id         int `json:"id"`
+			Joke       string `json:"joke"`
+		} `json:"value"`
+	}
+
+	getJoke := func(components ...string) (Joke, error) {
+		response := new(IcndbResponse)
+		err := GetJsonResponse(response, "https://api.icndb.com", append([]string{"/jokes"}, components...)...)
+		if err != nil {
+			return *new(Joke), err
+		}
+		return Joke(response.Value), nil
+	}
+
+	return JokeRetriever{
+		Random: func () (Joke, error) {
+			return getJoke("random")
+		},
+		WithId: func (jokeId int) (Joke, error) {
+			return getJoke(strconv.Itoa(jokeId))
 		},
 	}
 }
@@ -85,6 +111,10 @@ func GetJsonResponse(jsonResponse interface{}, urlBase string, urlComponents ...
 		return err
 	}
 	defer resp.Body.Close()
+	//dump, err := httputil.DumpResponse(resp, true)
+	//if err == nil {
+	//	fmt.Println("Response dump:", string(dump))
+	//}
 	json.NewDecoder(resp.Body).Decode(jsonResponse)
 	return nil
 }
@@ -103,7 +133,10 @@ type Handler struct {
 func JokeHandlerFactory(retriever JokeRetriever) Handler {
 	return Handler {
 		withId: func(w http.ResponseWriter, r *http.Request) {
-			jokeId := mux.Vars(r)["id"]
+			jokeId, err := strconv.Atoi(mux.Vars(r)["id"])
+			if err != nil {
+				return // should present something to the user here
+			}
 			if response, ok := Repository()[jokeId]; ok {
 				PresentJoke(w, response)
 			} else {
@@ -125,7 +158,7 @@ func JokeHandlerFactory(retriever JokeRetriever) Handler {
 }
 
 func main() {
-	var handlers = JokeHandlerFactory(HerokuJokesFactory())
+	var handlers = JokeHandlerFactory(IcndbJokesFactory())
 	r := mux.NewRouter()
 	r.HandleFunc("/jokes", handlers.random)
 	r.HandleFunc("/jokes/{id}", handlers.withId)
