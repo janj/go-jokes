@@ -26,11 +26,6 @@ func Repository() JokeMap {
 	return r
 }
 
-func PresentJoke(w http.ResponseWriter, joke jokesources.Joke) {
-	templates := template.Must(template.ParseFiles("templates/jokes-template.html"))
-	templates.ExecuteTemplate(w, "jokes-template.html", joke)
-}
-
 type Handler struct {
 	withId func(http.ResponseWriter, *http.Request)
 	random func(http.ResponseWriter, *http.Request)
@@ -58,15 +53,17 @@ func JokeHandlerFactory(retriever jokesources.JokeRetriever) Handler {
 
 	return Handler {
 		withId: func(w http.ResponseWriter, r *http.Request) {
-			joke, err := jokeForIdParam(r)
+			jokeId, err := strconv.Atoi(mux.Vars(r)["id"])
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
+			} else {
+				templates := template.Must(template.ParseFiles("templates/jokes-template.html"))
+				templates.ExecuteTemplate(w, "jokes-template.html", struct{JokeId int}{JokeId: jokeId})
 			}
-			PresentJoke(w, joke)
 		},
 		random: func(w http.ResponseWriter, r *http.Request) {
-			templates := template.Must(template.ParseFiles("templates/random-template.html"))
-			templates.ExecuteTemplate(w, "random-template.html", nil)
+			templates := template.Must(template.ParseFiles("templates/jokes-template.html"))
+			templates.ExecuteTemplate(w, "jokes-template.html", nil)
 		},
 		randomApi: func(w http.ResponseWriter, r *http.Request) {
 			joke, err := retriever.Random()
@@ -96,6 +93,7 @@ func main() {
 	r.HandleFunc("/jokes", handlers.random)
 	r.HandleFunc("/jokes/{id}", handlers.withId)
 	r.HandleFunc("/api/jokes", handlers.randomApi)
+	r.HandleFunc("/api/jokes/{id}", handlers.withIdApi)
 	http.Handle("/", r)
 	fmt.Println("Listening")
 	fmt.Println(http.ListenAndServe(":8080", nil))

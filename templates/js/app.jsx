@@ -1,10 +1,13 @@
 class App extends React.Component {
     constructor(props) {
         super(props);
-        this.state = {
-            jokes: []
-        };
-
+        console.log("WIN:", window.reactApp);
+        if(window.reactApp) {
+            this.state = { jokeId: window.reactApp.jokeId, jokes: [] };
+        }
+        else {
+            this.state = { jokeId: undefined, jokes: [] };
+        }
         this.serverRequest = this.serverRequest.bind(this);
     }
 
@@ -23,7 +26,8 @@ class App extends React.Component {
     }
 
     serverRequest() {
-        $.get("http://localhost:8080/api/jokes", res => {
+        const withId = this.state.jokeId ? `/${this.state.jokeId}` : "";
+        $.get(`http://localhost:8080/api/jokes${withId}`, res => {
             console.log("RESP:", res);
             this.setState({
                 jokes: res
@@ -35,7 +39,7 @@ class App extends React.Component {
 class Joke extends React.Component {
     constructor(props) {
         super(props);
-        console.log("PROPS:", props);
+        console.log("Joke:", props);
     }
 
     render() {
